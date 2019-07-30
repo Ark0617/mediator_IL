@@ -67,7 +67,7 @@ def traj_segment_generator(pi, env, horizon, stochastic):
 
 def learn(env, policy_func, med_func, expert_dataset, pretrained, pretrained_weight, g_step, m_step, save_per_iter,
           ckpt_dir, log_dir, timesteps_per_batch, task_name, max_timesteps=0, max_episodes=0, max_iters=0,
-          batch_size=128, med_stepsize=3e-4, pi_stepsize=3e-4, callback=None):
+          batch_size=128, med_stepsize=3e-4, pi_stepsize=3e-4, callback=None, writer=None):
     nworkers = MPI.COMM_WORLD.Get_size()
     rank = MPI.COMM_WORLD.Get_rank()
     np.set_printoptions(precision=3)
@@ -117,12 +117,10 @@ def learn(env, policy_func, med_func, expert_dataset, pretrained, pretrained_wei
     iters_so_far = 0
     tstart = time.time()
     lenbuffer = deque(maxlen=40)  # rolling buffer for episode lengths
-    rewbuffer = deque(maxlen=40)  # rolling buffer for episode rewards
     true_rewbuffer = deque(maxlen=40)
 
     assert sum([max_iters > 0, max_timesteps > 0, max_episodes > 0]) == 1
-    med_loss_stats = stats(["med_loss"])
-    pi_loss_stats = stats(["pi_loss"])
+    loss_stats = stats(["med_loss", "pi_loss"])
     ep_stats = stats(["True_rewards", "Episode_length"])
 
     if pretrained_weight is not None:
@@ -169,6 +167,7 @@ def learn(env, policy_func, med_func, expert_dataset, pretrained, pretrained_wei
             med_adam.update(allmean(g), med_stepsize)
             med_losses.append(newlosses)
 
+        logger.record_tabular("med_loss_each_iter", np.mean(np.array(med_losses)))
         for _ in range(g_step):
             g_batch = d.next_batch(optim_batchsize)
             g_ob, g_ac = g_batch['ob'], g_batch['ac']
@@ -177,3 +176,29 @@ def learn(env, policy_func, med_func, expert_dataset, pretrained, pretrained_wei
             pi_loss, g = compute_pi_lossandgrad(g_ob, g_ac)
             pi_adam.update(allmean(g), pi_stepsize)
             pi_losses.append(pi_loss)
+        logger.record_tabular("gen_loss_each_iter", np.mean(np.array(pi_losses)))
+        lrlocal = (seg["ep_lens"], seg["ep_true_rets"])
+        listoflrpairs = MPI.COMM_WORLD.allgather(lrlocal)
+        lens, true_rets = map(flatten_lists, zip(*listoflrpairs))
+        true_rewbuffer.extend(true_rets)
+        lenbuffer.extend(lens)
+
+        logger.record_tabular("EpLenMean", np.mean(lenbuffer))
+        logger.record_tabular("EpTrueRewMean", np.mean(true_rewbuffer))
+        logger.record_tabular("EpThisIter", len(lens))
+        episodes_so_far += len(lens)
+        timesteps_so_far += sum(lens)
+        iters_so_far += 1
+
+        logger.record_tabular("EpisodesSoFar", episodes_so_far)
+        logger.record_tabular("TimestepsSoFar", timesteps_so_far)
+        logger.record_tabular("TimeElapsed", time.time() - tstart)
+        if writer is not None:
+            loss_stats.add_all_summary(writer, [np.mean(np.array(med_losses)), np.mean(np.array(pi_losses))], episodes_so_far)
+            ep_stats.add_all_summary(writer, [np.mean(true_rewbuffer), np.mean(lenbuffer)], episodes_so_far)
+        if rank == 0:
+            logger.dump_tabular()
+
+
+def flatten_lists(listoflists):
+    return [el for list_ in listoflists for el in list_]

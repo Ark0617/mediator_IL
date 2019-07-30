@@ -13,6 +13,7 @@ from baselines.common.misc_util import boolean_flag
 from baselines import bench
 from baselines import logger
 from baselines.mediator.dataset.mujoco_dset import Mujoco_Dset
+from tensorboardX import SummaryWriter
 
 
 def argsparser():
@@ -21,7 +22,7 @@ def argsparser():
     parser.add_argument('--seed', help='RNG seed', type=int, default=0)
     parser.add_argument('--expert_path', type=str, default='../../data/deterministic.trpo.Hopper.0.00.npz')
     parser.add_argument('--checkpoint_dir', help='the directory to save model', default='checkpoint')
-    parser.add_argument('--log_dir', help='the directory to save log file', default='log')
+    parser.add_argument('--log_dir', help='the directory to save log file', default='logs')
     parser.add_argument('--load_model_path', help='if provided, load the model', type=str, default=None)
     # Task
     parser.add_argument('--task', type=str, choices=['train', 'evaluate', 'sample'], default='train')
@@ -79,10 +80,15 @@ def main(args):
     task_name = get_task_name(args)
     args.checkpoint_dir = osp.join(args.checkpoint_dir, task_name)
     args.log_dir = osp.join(args.log_dir, task_name)
+    if MPI.COMM_WORLD.Get_rank() == 0:
+        writer = SummaryWriter(comment=task_name)
+    else:
+        writer = None
     if args.task == 'train':
         dataset = Mujoco_Dset(expert_path=args.expert_path, traj_limitation=args.traj_limitation)
         train(env,
               args.seed,
+              writer,
               policy_fn,
               med_fn,
               dataset,
@@ -109,7 +115,7 @@ def main(args):
     env.close()
 
 
-def train(env, seed, policy_fn, med_fn, dataset, g_step, m_step, num_timesteps, save_per_iter, checkpoint_dir, log_dir,
+def train(env, seed, writer, policy_fn, med_fn, dataset, g_step, m_step, num_timesteps, save_per_iter, checkpoint_dir, log_dir,
           pretrained, BC_max_iter, task_name=None):
     pretrained_weight = None
     if pretrained and (BC_max_iter > 0):
@@ -121,8 +127,9 @@ def train(env, seed, policy_fn, med_fn, dataset, g_step, m_step, num_timesteps, 
     workerseed = seed + 10000 * MPI.COMMON_WORLD.Get_rank()
     set_global_seeds(workerseed)
     env.seed(workerseed)
+
     learner.learn(env, policy_fn, med_fn, dataset, pretrained, pretrained_weight, g_step, m_step, save_per_iter,
-          checkpoint_dir, log_dir, timesteps_per_batch=1024, task_name=task_name)
+          checkpoint_dir, log_dir, timesteps_per_batch=1024, task_name=task_name, writer=writer)
 
 
 if __name__ == '__main__':
