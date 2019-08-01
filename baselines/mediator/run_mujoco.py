@@ -13,6 +13,7 @@ from baselines.common.misc_util import boolean_flag
 from baselines import bench
 from baselines import logger
 from baselines.mediator.dataset.mujoco_dset import Mujoco_Dset
+import tensorflow as tf
 from tensorboardX import SummaryWriter
 
 
@@ -49,6 +50,8 @@ def argsparser():
     parser.add_argument('--pretrained', type=bool, default=False, help='Use BC to pretrain')
     # boolean_flag(parser, '--pretrained', default=False, help='Use BC to pretrain')
     parser.add_argument('--BC_max_iter', help='Max iteration for training BC', type=int, default=1e4)
+    parser.add_argument('--expert_step', help='expert steps for each iteration', type=int, default=0)
+    parser.add_argument('--inner_iter', help='num of inner iterations', type=int, default=100)
     return parser.parse_args()
 
 
@@ -81,7 +84,8 @@ def main(args):
     args.checkpoint_dir = osp.join(args.checkpoint_dir, task_name)
     args.log_dir = osp.join(args.log_dir, task_name)
     if MPI.COMM_WORLD.Get_rank() == 0:
-        writer = SummaryWriter(comment=task_name)
+        #writer = SummaryWriter(comment=task_name)
+        writer = tf.summary.FileWriter(args.log_dir, U.get_session().graph)
     else:
         writer = None
     if args.task == 'train':
@@ -94,6 +98,8 @@ def main(args):
               dataset,
               args.g_step,
               args.m_step,
+              args.expert_step,
+              args.inner_iter,
               args.num_timesteps,
               args.save_per_iter,
               args.checkpoint_dir,
@@ -115,21 +121,21 @@ def main(args):
     env.close()
 
 
-def train(env, seed, writer, policy_fn, med_fn, dataset, g_step, m_step, num_timesteps, save_per_iter, checkpoint_dir, log_dir,
+def train(env, seed, writer, policy_fn, med_fn, dataset, g_step, m_step, e_step, inner_iters, num_timesteps, save_per_iter, checkpoint_dir, log_dir,
           pretrained, BC_max_iter, task_name=None):
     pretrained_weight = None
     if pretrained and (BC_max_iter > 0):
         from baselines.gail import behavior_clone
         pretrained_weight = behavior_clone.learn(env, policy_fn, dataset, max_iters=BC_max_iter)
-    rank = MPI.COMMON_WORLD.Get_rank()
+    rank = MPI.COMM_WORLD.Get_rank()
     if rank != 0:
         logger.set_level(logger.DISABLED)
-    workerseed = seed + 10000 * MPI.COMMON_WORLD.Get_rank()
+    workerseed = seed + 10000 * MPI.COMM_WORLD.Get_rank()
     set_global_seeds(workerseed)
     env.seed(workerseed)
 
-    learner.learn(env, policy_fn, med_fn, dataset, pretrained, pretrained_weight, g_step, m_step, save_per_iter,
-          checkpoint_dir, log_dir, timesteps_per_batch=1024, task_name=task_name, writer=writer)
+    learner.learn(env, policy_fn, med_fn, dataset, pretrained, pretrained_weight, g_step, m_step, e_step, inner_iters, save_per_iter,
+          checkpoint_dir, log_dir, max_timesteps=num_timesteps, timesteps_per_batch=1024, task_name=task_name, writer=writer)
 
 
 if __name__ == '__main__':

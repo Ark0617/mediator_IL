@@ -18,6 +18,7 @@ from baselines import bench
 from baselines import logger
 from baselines.gail.dataset.mujoco_dset import Mujoco_Dset
 from baselines.gail.adversary import TransitionClassifier
+import tensorflow as tf
 
 
 def argsparser():
@@ -26,7 +27,7 @@ def argsparser():
     parser.add_argument('--seed', help='RNG seed', type=int, default=0)
     parser.add_argument('--expert_path', type=str, default='../../data/deterministic.trpo.Hopper.0.00.npz')
     parser.add_argument('--checkpoint_dir', help='the directory to save model', default='checkpoint')
-    parser.add_argument('--log_dir', help='the directory to save log file', default='log')
+    parser.add_argument('--log_dir', help='the directory to save log file', default='logs')
     parser.add_argument('--load_model_path', help='if provided, load the model', type=str, default=None)
     # Task
     parser.add_argument('--task', type=str, choices=['train', 'evaluate', 'sample'], default='train')
@@ -84,7 +85,12 @@ def main(args):
     task_name = get_task_name(args)
     args.checkpoint_dir = osp.join(args.checkpoint_dir, task_name)
     args.log_dir = osp.join(args.log_dir, task_name)
-
+    #cmp_logdir = osp.join(args.log_dir, task_name)
+    if MPI.COMM_WORLD.Get_rank() == 0:
+        #writer = SummaryWriter(comment=task_name)
+        writer = tf.summary.FileWriter(args.log_dir, U.get_session().graph)
+    else:
+        writer = None
     if args.task == 'train':
         dataset = Mujoco_Dset(expert_path=args.expert_path, traj_limitation=args.traj_limitation)
         reward_giver = TransitionClassifier(env, args.adversary_hidden_size, entcoeff=args.adversary_entcoeff)
@@ -103,7 +109,8 @@ def main(args):
               args.log_dir,
               args.pretrained,
               args.BC_max_iter,
-              task_name
+              task_name=task_name,
+              writer=writer
               )
     elif args.task == 'evaluate':
         runner(env,
@@ -121,7 +128,7 @@ def main(args):
 
 def train(env, seed, policy_fn, reward_giver, dataset, algo,
           g_step, d_step, policy_entcoeff, num_timesteps, save_per_iter,
-          checkpoint_dir, log_dir, pretrained, BC_max_iter, task_name=None):
+          checkpoint_dir, log_dir, pretrained, BC_max_iter, writer=None, task_name=None):
 
     pretrained_weight = None
     if pretrained and (BC_max_iter > 0):
@@ -150,7 +157,8 @@ def train(env, seed, policy_fn, reward_giver, dataset, algo,
                        max_kl=0.01, cg_iters=10, cg_damping=0.1,
                        gamma=0.995, lam=0.97,
                        vf_iters=5, vf_stepsize=1e-3,
-                       task_name=task_name)
+                       task_name=task_name,
+                       writer=writer)
     else:
         raise NotImplementedError
 

@@ -110,7 +110,8 @@ def learn(env, policy_func, reward_giver, expert_dataset, rank,
           max_kl, cg_iters, cg_damping=1e-2,
           vf_stepsize=3e-4, d_stepsize=3e-4, vf_iters=3,
           max_timesteps=0, max_episodes=0, max_iters=0,
-          callback=None
+          callback=None,
+          writer=None
           ):
 
     nworkers = MPI.COMM_WORLD.Get_size()
@@ -215,7 +216,8 @@ def learn(env, policy_func, reward_giver, expert_dataset, rank,
 
     g_loss_stats = stats(loss_names)
     d_loss_stats = stats(reward_giver.loss_name)
-    ep_stats = stats(["True_rewards", "Rewards", "Episode_length"])
+    #ep_stats = stats(["True_rewards", "Rewards", "Episode_length"])
+    ep_stats = stats(["True_rewards",  "Episode_length"])
     # if provide pretrained weight
     if pretrained_weight is not None:
         U.load_state(pretrained_weight, var_list=pi.get_variables())
@@ -345,6 +347,9 @@ def learn(env, policy_func, reward_giver, expert_dataset, rank,
         logger.record_tabular("EpisodesSoFar", episodes_so_far)
         logger.record_tabular("TimestepsSoFar", timesteps_so_far)
         logger.record_tabular("TimeElapsed", time.time() - tstart)
+
+        if writer is not None:
+            ep_stats.add_all_summary(writer, [np.mean(true_rewbuffer), np.mean(lenbuffer)], episodes_so_far)
 
         if rank == 0:
             logger.dump_tabular()
