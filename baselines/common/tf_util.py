@@ -236,6 +236,7 @@ def flatgrad(loss, var_list, clip_norm=None):
         for (v, grad) in zip(var_list, grads)
     ])
 
+
 class SetFromFlat(object):
     def __init__(self, var_list, dtype=tf.float32):
         assigns = []
@@ -254,12 +255,14 @@ class SetFromFlat(object):
     def __call__(self, theta):
         tf.get_default_session().run(self.op, feed_dict={self.theta: theta})
 
+
 class GetFlat(object):
     def __init__(self, var_list):
         self.op = tf.concat(axis=0, values=[tf.reshape(v, [numel(v)]) for v in var_list])
 
     def __call__(self):
         return tf.get_default_session().run(self.op)
+
 
 def flattenallbut0(x):
     return tf.reshape(x, [-1, intprod(x.get_shape().as_list()[1:])])

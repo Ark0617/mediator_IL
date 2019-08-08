@@ -46,6 +46,7 @@ def argsparser():
     # Traing Configuration
     parser.add_argument('--save_per_iter', help='save model every xx iterations', type=int, default=100)
     parser.add_argument('--num_timesteps', help='number of timesteps per episode', type=int, default=5e6)
+    parser.add_argument('--pi_stepsize', help='stepsize for pi', type=float, default=3e-4)
     # Behavior Cloning
     parser.add_argument('--pretrained', type=bool, default=False, help='Use BC to pretrain')
     # boolean_flag(parser, '--pretrained', default=False, help='Use BC to pretrain')
@@ -100,6 +101,7 @@ def main(args):
               args.m_step,
               args.expert_step,
               args.inner_iter,
+              args.pi_stepsize,
               args.num_timesteps,
               args.save_per_iter,
               args.checkpoint_dir,
@@ -121,7 +123,7 @@ def main(args):
     env.close()
 
 
-def train(env, seed, writer, policy_fn, med_fn, dataset, g_step, m_step, e_step, inner_iters, num_timesteps, save_per_iter, checkpoint_dir, log_dir,
+def train(env, seed, writer, policy_fn, med_fn, dataset, g_step, m_step, e_step, inner_iters, pi_stepsize, num_timesteps, save_per_iter, checkpoint_dir, log_dir,
           pretrained, BC_max_iter, task_name=None):
     pretrained_weight = None
     if pretrained and (BC_max_iter > 0):
@@ -135,7 +137,7 @@ def train(env, seed, writer, policy_fn, med_fn, dataset, g_step, m_step, e_step,
     env.seed(workerseed)
 
     learner.learn(env, policy_fn, med_fn, dataset, pretrained, pretrained_weight, g_step, m_step, e_step, inner_iters, save_per_iter,
-          checkpoint_dir, log_dir, max_timesteps=num_timesteps, timesteps_per_batch=1024, task_name=task_name, writer=writer)
+          checkpoint_dir, log_dir, pi_stepsize=pi_stepsize, max_timesteps=num_timesteps, timesteps_per_batch=1024, task_name=task_name, writer=writer)
 
 
 if __name__ == '__main__':

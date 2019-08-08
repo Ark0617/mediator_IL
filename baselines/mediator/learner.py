@@ -66,7 +66,7 @@ def traj_segment_generator(pi, env, horizon, stochastic):
 
 
 def learn(env, policy_func, med_func, expert_dataset, pretrained, pretrained_weight, g_step, m_step, e_step, inner_iters, save_per_iter,
-          ckpt_dir, log_dir, timesteps_per_batch, task_name, max_timesteps=0, max_episodes=0, max_iters=0,
+          ckpt_dir, log_dir, timesteps_per_batch, task_name, max_kl=0.01, max_timesteps=0, max_episodes=0, max_iters=0,
           batch_size=128, med_stepsize=3e-4, pi_stepsize=3e-4, callback=None, writer=None):
     nworkers = MPI.COMM_WORLD.Get_size()
     rank = MPI.COMM_WORLD.Get_rank()
@@ -74,6 +74,7 @@ def learn(env, policy_func, med_func, expert_dataset, pretrained, pretrained_wei
     ob_space = env.observation_space
     ac_space = env.action_space
     pi = policy_func("pi", ob_space, ac_space, reuse=(pretrained_weight != None))
+    oldpi = policy_func("oldpi", ob_space, ac_space)
     med = med_func("mediator", ob_space, ac_space, reuse=False)
     pi_var_list = pi.get_trainable_variables()
     med_var_list = med.get_trainable_variables()
@@ -81,18 +82,35 @@ def learn(env, policy_func, med_func, expert_dataset, pretrained, pretrained_wei
     ac = U.get_placeholder(name='ac', dtype=tf.float32, shape=[None] + list(ac_space.shape))
     med_loss = -tf.reduce_mean(med.pd.logp(ac))
     #pi_loss = -0.5 * (tf.reduce_mean(pi.pd.logp(ac) - med.pd.logp(ac)))
-    pi_loss = tf.reduce_mean(pi.pd.kl(med.pd)) #- tf.reduce_mean(pi.pd.entropy())
+    pi_loss = tf.reduce_mean(pi.pd.kl(med.pd))  #- tf.reduce_mean(pi.pd.entropy())
+    kloldnew = oldpi.pd.kl(pi.pd)
+    meankl = tf.reduce_mean(kloldnew)
+    dist = meankl
     expert_loss = -tf.reduce_mean(pi.pd.logp(ac))
+    # klgrads = tf.gradients(dist, pi_var_list)
+    # flat_tangent = tf.placeholder(dtype=tf.float32, shape=[None], name='flat_tan')
+    # shapes = [var.get_shape().as_list() for var in pi_var_list]
+    # start = 0
+    # tangents = []
+    # for shape in shapes:
+    #     sz = U.intprod(shape)
+    #     tangents.append(tf.reshape(flat_tangent[start:start+sz], shape))
+    #     start += sz
+    # gvp = tf.add_n([tf.reduce_sum(g*tangent) for (g, tangent) in zipsame(klgrads, tangents)])
+    # fvp = U.flatgrad(gvp, pi_var_list)
+
+    assign_old_eq_new = U.function([], [], updates=[tf.assign(oldv, newv) for (oldv, newv) in zipsame(oldpi.get_variables(), pi.get_variables())])
+
     compute_med_loss = U.function([ob, ac], med_loss)
     compute_pi_loss = U.function([ob, ac], pi_loss)
     compute_exp_loss = U.function([ob, ac], expert_loss)
+    compute_kl_loss = U.function([ob], dist)
+    # compute_fvp = U.function([flat_tangent, ob, ac], fvp)
     compute_med_lossandgrad = U.function([ob, ac], [med_loss, U.flatgrad(med_loss, med_var_list)])
     compute_pi_lossandgrad = U.function([ob],  [pi_loss, U.flatgrad(pi_loss, pi_var_list)])
     compute_exp_lossandgrad = U.function([ob, ac], [expert_loss, U.flatgrad(expert_loss, pi_var_list)])
-    get_pi_flat = U.GetFlat(pi_var_list)
-    get_med_flat = U.GetFlat(med_var_list)
-    set_pi_from_flat = U.SetFromFlat(pi_var_list)
-    set_med_from_flat = U.SetFromFlat(med_var_list)
+    get_flat = U.GetFlat(pi_var_list)
+    set_from_flat = U.SetFromFlat(pi_var_list)
     med_adam = MpiAdam(med_var_list)
     pi_adam = MpiAdam(pi_var_list)
 
@@ -104,11 +122,10 @@ def learn(env, policy_func, med_func, expert_dataset, pretrained, pretrained_wei
         return out
 
     U.initialize()
-    # th_pi_init = get_pi_flat()
-    # th_med_init = get_med_flat()
-    # MPI.COMM_WORLD.Bcast([th_pi_init, th_med_init], root=0)
-    # set_pi_from_flat(th_pi_init)
-    # set_med_from_flat(th_med_init)
+    # th_init = get_flat()
+    # MPI.COMM_WORLD.Bcast(th_init, root=0)
+    # set_from_flat(th_init)
+
     med_adam.sync()
     pi_adam.sync()
     # if rank == 0:
@@ -147,17 +164,23 @@ def learn(env, policy_func, med_func, expert_dataset, pretrained, pretrained_wei
             saver.save(tf.get_default_session(), fname)
 
         logger.log("********** Iteration %i ************" % iters_so_far)
-
         # ======= Optimize Mediator=========
 
         seg = seg_gen.__next__()
         g_ob, g_ac = seg['ob'], seg['ac']
+        assign_old_eq_new()
+        #stepsize = 3e-4
+        # thbefore = get_flat()
         d = Dataset(dict(ob=g_ob, ac=g_ac))
         optim_batchsize = min(batch_size, len(g_ob))
         med_losses = []
         pi_losses = []
         exp_losses = []
         for _ in range(inner_iters):
+            # seg = seg_gen.__next__()
+            # g_ob, g_ac = seg['ob'], seg['ac']
+            # d = Dataset(dict(ob=g_ob, ac=g_ac))
+            # optim_batchsize = min(batch_size, len(g_ob))
             logger.log("Expert Pretrain...")
             for _ in range(e_step):
                 ob, ac = expert_dataset.get_next_batch(batch_size)
@@ -184,14 +207,22 @@ def learn(env, policy_func, med_func, expert_dataset, pretrained, pretrained_wei
             #logger.record_tabular("med_loss_each_iter", np.mean(np.array(med_losses)))
 
             logger.log("Optimizing Generator...")
-            for _ in range(g_step):
-                g_batch = d.next_batch(optim_batchsize)
-                g_ob, g_ac = g_batch['ob'], g_batch['ac']
-                if hasattr(pi, "obs_rms"):
-                    pi.obs_rms.update(g_ob)
-                pi_loss, g = compute_pi_lossandgrad(g_ob)
-                pi_adam.update(allmean(g), pi_stepsize)
-                pi_losses.append(pi_loss)
+            #for _ in range(g_step):
+            g_batch = d.next_batch(optim_batchsize)
+            g_ob, g_ac = g_batch['ob'], g_batch['ac']
+            if hasattr(pi, "obs_rms"):
+                pi.obs_rms.update(g_ob)
+            pi_loss, g = compute_pi_lossandgrad(g_ob)
+            kl = compute_kl_loss(g_ob)
+            if kl > max_kl * 1.5:
+                logger.log("violated KL constraint. Shrinking step.")
+                # stepsize *= 0.1
+                break
+            else:
+                logger.log("Stepsize OK!")
+            pi_adam.update(allmean(g), pi_stepsize)
+            pi_losses.append(pi_loss)
+
             #logger.record_tabular("gen_loss_each_iter", np.mean(np.array(pi_losses)))
         logger.record_tabular("expert_loss_each_iter", np.mean(np.array(exp_losses)))
         logger.record_tabular("med_loss_each_iter", np.mean(np.array(med_losses)))
