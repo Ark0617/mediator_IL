@@ -1,0 +1,2 @@
+model_checkpoint_path: "med_step_10_pi_stepsize_100.0_med_stepsize_1000.0_mediator_ILtransition_limitation_-1Hopper_seed__1_2019-08-08 21:53:31"
+all_model_checkpoint_paths: "med_step_10_pi_stepsize_100.0_med_stepsize_1000.0_mediator_ILtransition_limitation_-1Hopper_seed__1_2019-08-08 21:53:31"

@@ -15,7 +15,7 @@ from baselines import logger
 from baselines.mediator.dataset.mujoco_dset import Mujoco_Dset
 import tensorflow as tf
 from tensorboardX import SummaryWriter
-
+from datetime import datetime
 
 def argsparser():
     parser = argparse.ArgumentParser("Tensorflow implement of Mediator Imitation Learning")
@@ -46,7 +46,8 @@ def argsparser():
     # Traing Configuration
     parser.add_argument('--save_per_iter', help='save model every xx iterations', type=int, default=100)
     parser.add_argument('--num_timesteps', help='number of timesteps per episode', type=int, default=5e6)
-    parser.add_argument('--pi_stepsize', help='stepsize for pi', type=float, default=3e-4)
+    parser.add_argument('--pi_stepsize', help='stepsize for pi', type=float, default=1e-3)
+    parser.add_argument('--med_stepsize', help='stepsize for mediator', type=float, default=1e-3)
     # Behavior Cloning
     parser.add_argument('--pretrained', type=bool, default=False, help='Use BC to pretrain')
     # boolean_flag(parser, '--pretrained', default=False, help='Use BC to pretrain')
@@ -57,13 +58,13 @@ def argsparser():
 
 
 def get_task_name(args):
-    task_name = 'med_step_'+str(args.m_step)+'_mediator_IL'
+    task_name = 'med_step_'+str(args.m_step)+'_pi_stepsize_'+str(args.pi_stepsize)+'_med_stepsize_'+str(args.med_stepsize)+'_mediator_IL'
     if args.pretrained:
         task_name += '_with_pretrained'
     if args.traj_limitation != np.inf:
         task_name += 'transition_limitation_%d' % args.traj_limitation
     task_name += args.env_id.split("-")[0]
-    task_name += "_seed__" + str(args.seed)
+    task_name += "_seed__" + str(args.seed) + '_' + datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     return task_name
 
 
@@ -102,6 +103,7 @@ def main(args):
               args.expert_step,
               args.inner_iter,
               args.pi_stepsize,
+              args.med_stepsize,
               args.num_timesteps,
               args.save_per_iter,
               args.checkpoint_dir,
@@ -123,7 +125,7 @@ def main(args):
     env.close()
 
 
-def train(env, seed, writer, policy_fn, med_fn, dataset, g_step, m_step, e_step, inner_iters, pi_stepsize, num_timesteps, save_per_iter, checkpoint_dir, log_dir,
+def train(env, seed, writer, policy_fn, med_fn, dataset, g_step, m_step, e_step, inner_iters, pi_stepsize, med_stepsize, num_timesteps, save_per_iter, checkpoint_dir, log_dir,
           pretrained, BC_max_iter, task_name=None):
     pretrained_weight = None
     if pretrained and (BC_max_iter > 0):
@@ -137,7 +139,7 @@ def train(env, seed, writer, policy_fn, med_fn, dataset, g_step, m_step, e_step,
     env.seed(workerseed)
 
     learner.learn(env, policy_fn, med_fn, dataset, pretrained, pretrained_weight, g_step, m_step, e_step, inner_iters, save_per_iter,
-          checkpoint_dir, log_dir, pi_stepsize=pi_stepsize, max_timesteps=num_timesteps, timesteps_per_batch=1024, task_name=task_name, writer=writer)
+          checkpoint_dir, log_dir, med_stepsize=med_stepsize, pi_stepsize=pi_stepsize, max_timesteps=num_timesteps, timesteps_per_batch=1024, task_name=task_name, writer=writer)
 
 
 if __name__ == '__main__':

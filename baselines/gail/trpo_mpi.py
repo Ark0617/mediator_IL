@@ -214,8 +214,8 @@ def learn(env, policy_func, reward_giver, expert_dataset, rank,
 
     assert sum([max_iters > 0, max_timesteps > 0, max_episodes > 0]) == 1
 
-    g_loss_stats = stats(loss_names)
-    d_loss_stats = stats(reward_giver.loss_name)
+    # g_loss_stats = stats(loss_names)
+    # d_loss_stats = stats(reward_giver.loss_name)
     #ep_stats = stats(["True_rewards", "Rewards", "Episode_length"])
     ep_stats = stats(["True_rewards",  "Episode_length"])
     # if provide pretrained weight

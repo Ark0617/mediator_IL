@@ -1,7 +1,7 @@
 from baselines.common import plot_util as pu
 import matplotlib.pyplot as plt
 import numpy as np
-results = pu.load_results('~/logs/HopperCmp/')
+results = pu.load_results('~/logs/NewHopperCmp/')
 print(len(results))
 pu.plot_results(results, average_group=True, split_fn=lambda _: '')
 #print(np.cumsum(results[0].monitor.l))
